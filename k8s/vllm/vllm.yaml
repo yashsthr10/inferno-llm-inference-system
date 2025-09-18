@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      containers:
+      - name: vllm
+        # IMPORTANT: This must be the image you built with your new Dockerfile
+        image: yashsthr/vllm-server:latest
+        # This command section is updated to match your new Dockerfile's CMD
+        command: ["/bin/sh", "-c"]
+        args:
+          - >
+            huggingface-cli login --token $HUGGINGFACE_TOKEN &&
+            python3 -m vllm.entrypoints.openai.api_server
+            --model $MODEL_NAME
+            --served-model-name my-quantized-model
+            --gpu-memory-utilization $GPU_MEMORY_UTILIZATION
+            --quantization awq
+            --max-model-len 4096
+            --dtype float16
+        ports:
+        - containerPort: 8000
+        env:
+        # These env vars are used by the command above
+        - name: HUGGINGFACE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: HUGGINGFACE_TOKEN
+        - name: MODEL_NAME
+          value: "TheBloke/Mistral-7B-Instruct-v0.2-AWQ"
+        - name: GPU_MEMORY_UTILIZATION
+          value: "0.9"
+        # Mount for the Hugging Face model cache
+        volumeMounts:
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        # Resource requests, including the necessary GPU
+        resources:
+          limits:
+            cpu: "2"
+            memory: 10Gi
+            nvidia.com/gpu: "1"
+      volumes:
+      - name: huggingface-cache
+        persistentVolumeClaim:
+          claimName: huggingface-cache-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+spec:
+  # ClusterIP makes it internal only, which is correct
+  type: ClusterIP
+  selector:
+    app: vllm
+  ports:
+  - port: 8000
+    targetPort: 8000

@@ -1,0 +1,66 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs (Windows path)
+  - job_name: docker-containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker-containers
+          __path__: /var/lib/docker/containers/*/*.log
+    pipeline_stages:
+      - docker: {}
+      - labels:
+          container_name:
+          image:
+      - output:
+          source: output
+
+  # Application logs from consumer service
+  - job_name: consumer-logs
+    static_configs:
+      - targets: ['localhost']
+        labels:
+          job: consumer-logs
+          service: consumer
+          __path__: /app/logs/*.log
+    pipeline_stages:
+      - match:
+          selector: '{job="consumer-logs"}'
+          stages:
+            - regex:
+                expression: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.*)'
+            - labels:
+                level:
+            - timestamp:
+                source: timestamp
+                format: '2006-01-02 15:04:05'
+
+  # System logs (if you want to collect them)
+  - job_name: system-logs
+    static_configs:
+      - targets: ['localhost']
+        labels:
+          job: system-logs
+          __path__: /var/log/syslog
+    pipeline_stages:
+      - match:
+          selector: '{job="system-logs"}'
+          stages:
+            - regex:
+                expression: '(?P<timestamp>\w+\s+\d+\s+\d{2}:\d{2}:\d{2}) (?P<hostname>\S+) (?P<service>\S+): (?P<message>.*)'
+            - labels:
+                hostname:
+                service:
+            - timestamp:
+                source: timestamp
+                format: 'Jan 02 15:04:05'
